@@ -1,5 +1,4 @@
-import os
-import sys
+import datetime
 import re
 
 
@@ -9,7 +8,7 @@ class RespHandler:
         self.k_v_dict = {
             "admin": "12345"
         }
-        self.command_log = []
+
         self.executable_command = {
             "ping": (self.ping, True),
             "get": (self.get, True),
@@ -18,7 +17,8 @@ class RespHandler:
             "auth": (self.auth, True),
             "del": (self.delete, True),
             "exists": (self.exists, True),
-            "dbsize": (self.exists, True)
+            "dbsize": (self.dbsize, True),
+            "config": (self.config, True)
 
         }
         self.unexecutable_command = [
@@ -28,9 +28,6 @@ class RespHandler:
             "incr", "decr", "append", "strlen", "getset", "setrange", "getrange", "rpush", "lpush", "linsert", "lrange",
             "lindex", "llen", "rpop", "lpop", "lrem", "lset", "blpop",
 
-        ]
-        self.danger_command = [
-            "config"
         ]
         self.max_num = 100
 
@@ -50,7 +47,6 @@ class RespHandler:
             else:
                 cache["params"].append(command)
 
-        self.command_log.append(cache)
         return cache
 
     # 返回数据格式化处理
@@ -59,44 +55,35 @@ class RespHandler:
             result_str = "-" + result + "\r\n"
         else:
             if type(result) == str:
-                print(result)
                 result_str = "+" + result + "\r\n"
             if type(result) == dict:
-                print(result)
                 length = len(result)
                 result_str = "*" + str(length) + "\r\n"
                 for k, v in result.items():
                     k_l = len(k)
                     result_str += "$" + str(k_l) + "\r\n" + str(k) + "\r\n"
-                    v_l = len(v)
-                    result_str += "$" + str(v_l) + "\r\n" + str(v) + "\r\n"
-
             if type(result) == int:
-                print(result)
-                result_str = "$" + str(result) + "\r\n"
+                result_str = ":" + str(result) + "\r\n"
 
         return result_str
 
     # 命令处理引擎
     def handle_command(self, command):
         cache = self._parser(command)
-        cmd = cache.get("cmd")[1]
-        try:
-            if cmd in self.executable_command.keys():
-                if self.executable_command.get(cmd)[1]:
-                    result, error = self.executable_command.get(cmd)[0](cache)
-                else:
-                    result, error = self.finall_error()
-            elif cmd in self.danger_command:
-                # 埋点
+        cmd = cache.get("cmd")[1].lower()
+        # try:
+        if cmd in self.executable_command.keys():
+            if self.executable_command.get(cmd)[1]:
+                result, error = self.executable_command.get(cmd)[0](cache)
+            else:
                 result, error = self.finall_error()
 
-            elif cmd in self.unexecutable_command:
-                result, error = self.finall_error()
-            else:
-                result, error = self.normal_error(cache)
-        except Exception:
+        elif cmd in self.unexecutable_command:
             result, error = self.finall_error()
+        else:
+                result, error = self.normal_error(cache)
+        # except Exception:
+        #     result, error = self.finall_error()
 
         result = self._format(result, error=error).encode("utf8")
         print(f"result ==> {result}")
@@ -123,13 +110,13 @@ class RespHandler:
     def exists(self, cache):
         cmd = cache.get("cmd")
         params = cache.get("params")
-        if len(params) == 1:
-            result = self.k_v_dict.get(params[0][1])
+        if len(params) >= 1:
+            result = 0
             error = False
-            if result is None:
-                result = 0
-            else:
-                result = 1
+            for param in params:
+                value = self.k_v_dict.get(param[1])
+                if value is not None:
+                    result += 1
         else:
             result = self._num_error(cmd)
             error = True
@@ -141,9 +128,9 @@ class RespHandler:
         params = cache.get("params")
         if len(params) == 0:
             result = len(self.k_v_dict)
+            error = False
         else:
-            result = self._num_error(cmd)
-            error = True
+            result, error = self._num_error(cmd)
 
         print(f"dbsize ==> {result}")
         return result, error
@@ -197,7 +184,7 @@ class RespHandler:
             error = False
             for param in params:
                 try:
-                    del self.k_v_dict[param]
+                    del(self.k_v_dict[param[1]])
                     count += 1
                 except:
                     continue
@@ -221,10 +208,33 @@ class RespHandler:
 
         return result, error
 
+    # 重要监控命令config
+    def config(self, cache):
+        # 做埋点
+        error = True
+        cmd = cache.get("cmd")
+        params = cache.get("params")
+        if len(params) < 1:
+            result, error = self._num_error(cmd)
+        else:
+            c = params[0][1].lower()
+            if c == "help":
+                result = """1) CONFIG <subcommand> arg arg ... arg. Subcommands are:
+2) GET <pattern> -- Return parameters matching the glob-like <pattern> and their values.
+3) SET <parameter> <value> -- Set parameter to value.
+4) RESETSTAT -- Reset statistics reported by INFO.
+5) REWRITE -- Rewrite the configuration file."""
+                error = False
+            else:
+                result = f"ERR Unknown subcommand or wrong number of arguments for '{params[0][1]}'. Try CONFIG HELP"
+                error = True
+
+        return result, error
+
     # 错误信息
     def _num_error(self, cmd):
         error = True
-        return f"ERR wrong number of arguments for '{cmd}' command", error
+        return f"ERR wrong number of arguments for '{cmd[1]}' command", error
 
     def normal_error(self, cache):
         error = True
@@ -242,4 +252,6 @@ class RespHandler:
 
 if __name__ == '__main__':
     a = RespHandler()
+    cmd = "*2\r\n$3\r\ndel\r\n$5\r\nadmin\r\n"
+    print(a.handle_command(cmd))
 
