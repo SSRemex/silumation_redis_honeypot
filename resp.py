@@ -63,7 +63,10 @@ class RespHandler:
                     k_l = len(k)
                     result_str += "$" + str(k_l) + "\r\n" + str(k) + "\r\n"
             if type(result) == int:
-                result_str = ":" + str(result) + "\r\n"
+                if result == -1:
+                    result_str = "$" + str(result) + "\r\n"
+                else:
+                    result_str = ":" + str(result) + "\r\n"
 
         return result_str
 
